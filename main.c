@@ -51,10 +51,11 @@ int enemyCount = 0;
 float levelTime = LEVEL_TIME;
 
 bool isGameOver = false;
+bool isWin = false;
 
 char selectedTileToInsert = ' ';
 
-char keysToInsertTiles[] = {KEY_SPACE, KEY_G, KEY_L, KEY_D, KEY_K, KEY_S};
+char keysToInsertTiles[] = {KEY_SPACE, KEY_G, KEY_L, KEY_D, KEY_K, KEY_S, KEY_E};
 int numKeysToInsertTiles = sizeof(keysToInsertTiles) / sizeof(keysToInsertTiles[0]);
 
 char tilemap[LEVEL_COUNT][MAP_HEIGHT * MAP_WIDTH + 1] = {
@@ -575,6 +576,18 @@ void drawGameOver()
       WHITE);
 }
 
+void drawWin()
+{
+  int winWidth = MeasureText("You Win", 20);
+
+  DrawText(
+      "You Win",
+      RENDER_WIDTH / 2 - winWidth / 2,
+      RENDER_HEIGHT / 2 - 10,
+      20,
+      WHITE);
+}
+
 void handleMouseClick(int mouseX, int mouseY)
 {
   int tileX = mouseX / (GetScreenWidth() / MAP_WIDTH);
@@ -583,6 +596,9 @@ void handleMouseClick(int mouseX, int mouseY)
   if (tileX >= 0 && tileX < MAP_WIDTH && tileY >= 0 && tileY < MAP_HEIGHT)
   {
     tilemap[level][tileY * MAP_WIDTH + tileX] = selectedTileToInsert;
+
+    if (selectedTileToInsert == 'E')
+      initEnemies();
   }
 }
 
@@ -638,7 +654,7 @@ int main(void)
 
     float dt = GetFrameTime();
 
-    if (isGameOver)
+    if (isGameOver || isWin)
     {
       if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_R))
         restartGame();
@@ -647,7 +663,8 @@ int main(void)
     {
       levelTime -= dt;
 
-      if (levelTime <= 0) {
+      if (levelTime <= 0)
+      {
         levelTime = LEVEL_TIME;
         playerDeath();
       }
@@ -670,6 +687,9 @@ int main(void)
 
     if (isGameOver)
       drawGameOver();
+
+    if (isWin)
+      drawWin();
 
     EndTextureMode();
 
@@ -721,11 +741,14 @@ int main(void)
 
 void changeLevel()
 {
-  level = (level + 1) % LEVEL_COUNT;
-  levelTime = LEVEL_TIME;
+  if (level + 1 == LEVEL_COUNT)
+  {
+    isWin = true;
+    return;
+  }
 
-  if (level == 0)
-    resetTilemap();
+  level++;
+  levelTime = LEVEL_TIME;
 
   initPlayer();
   initEnemies();
@@ -737,6 +760,7 @@ void restartGame()
   lives = LIVES;
   levelTime = LEVEL_TIME;
   isGameOver = false;
+  isWin = false;
 
   resetTilemap();
   initPlayer();
