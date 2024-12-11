@@ -6,7 +6,14 @@
 #define MAP_WIDTH 33
 #define MAP_HEIGHT 18
 #define TILE_SIZE 12
+#define TILE_COUNT 6
+#define LEVEL_COUNT 2
+#define LEVEL_TIME 200
 #define GRAVITY 9.81
+#define LIVES 3
+#define MAX_ENEMIES 10
+
+#define GET_TILE(x, y) (tilemap[level][(y) * MAP_WIDTH + (x)])
 
 typedef struct Tile
 {
@@ -14,14 +21,35 @@ typedef struct Tile
   Rectangle textureRect;
 } Tile;
 
-#define TILE_COUNT 6
+typedef struct Player
+{
+  Vector2 pos;
+  Vector2 vel;
+  Rectangle textureRect;
+  float speed;
+  float jumpHeight;
+  bool isOnGround;
+} Player;
 
-Tile tiles[TILE_COUNT];
-
-#define LEVEL_COUNT 2
+typedef struct Enemy
+{
+  Vector2 pos;
+  Vector2 vel;
+  int direction;
+  Rectangle textureRect;
+  float speed;
+} Enemy;
 
 int level = 0;
-float time = 200;
+int lives = LIVES;
+int enemyCount = 0;
+
+float levelTime = LEVEL_TIME;
+
+char selectedTileToInsert = ' ';
+
+char keysToInsertTiles[] = {KEY_SPACE, KEY_G, KEY_L, KEY_D, KEY_K, KEY_S};
+int numKeysToInsertTiles = sizeof(keysToInsertTiles) / sizeof(keysToInsertTiles[0]);
 
 char tilemap[LEVEL_COUNT][MAP_HEIGHT * MAP_WIDTH + 1] = {
     "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
@@ -33,10 +61,10 @@ char tilemap[LEVEL_COUNT][MAP_HEIGHT * MAP_WIDTH + 1] = {
     "G                               G"
     "G                               G"
     "G       D                       G"
-    "G  K                            G"
+    "G  K  E                         G"
     "G  GGLGGGG                      G"
     "G    L                          G"
-    "G    L       K                  G"
+    "G    L   E   K                  G"
     "G  GGGGGGGGLGG                  G"
     "G          L                    G"
     "G  P       L               G    G"
@@ -58,10 +86,18 @@ char tilemap[LEVEL_COUNT][MAP_HEIGHT * MAP_WIDTH + 1] = {
     "G                               G"
     "G                               G"
     "G  P                        D   G"
-    "G            K                  G"
+    "G            K     E            G"
     "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"};
 
 char initialTilemap[LEVEL_COUNT][MAP_HEIGHT * MAP_WIDTH + 1];
+
+Tile tiles[TILE_COUNT];
+
+Player player = {0};
+
+Enemy enemies[MAX_ENEMIES];
+
+void changeLevel();
 
 void initTilemap()
 {
@@ -81,7 +117,28 @@ void resetTilemap()
   }
 }
 
-#define GET_TILE(x, y) (tilemap[level][(y) * MAP_WIDTH + (x)])
+void saveTilemapToFile()
+{
+  FILE *file = fopen("tilemap.txt", "w");
+
+  if (file == NULL)
+  {
+    perror("Unable to open file");
+    return;
+  }
+
+  for (int y = 0; y < MAP_HEIGHT; y++)
+  {
+    for (int x = 0; x < MAP_WIDTH; x++)
+    {
+      fputc(tilemap[level][y * MAP_WIDTH + x], file);
+    }
+
+    fputc('\n', file);
+  }
+
+  fclose(file);
+}
 
 void initTiles()
 {
@@ -99,7 +156,13 @@ void initTiles()
   tiles[5].textureRect = (Rectangle){TILE_SIZE * 5, 0, TILE_SIZE, TILE_SIZE};
 }
 
-void drawTiles(Texture2D *tileset)
+void initMap()
+{
+  initTilemap();
+  initTiles();
+}
+
+void drawMap(Texture2D *tileset)
 {
   for (int y = 0; y < MAP_HEIGHT; y++)
   {
@@ -213,18 +276,6 @@ void pickUpKey(int x, int y)
     openDoor();
 }
 
-typedef struct Player
-{
-  Vector2 pos;
-  Vector2 vel;
-  Rectangle textureRect;
-  float speed;
-  float jumpHeight;
-  bool isOnGround;
-} Player;
-
-Player player = {0};
-
 Vector2 findPlayerPosition()
 {
   for (int y = 0; y < MAP_HEIGHT; y++)
@@ -251,16 +302,7 @@ void initPlayer()
   player.isOnGround = false;
 }
 
-void changeLevel()
-{
-  level = (level + 1) % LEVEL_COUNT;
-  time = 200;
-
-  if (level == 0)
-    resetTilemap();
-
-  initPlayer();
-}
+void playerDeath();
 
 void updatePlayer(float dt)
 {
@@ -339,7 +381,7 @@ void updatePlayer(float dt)
   bool onSpike = GET_TILE((int)centerX / TILE_SIZE, (int)bottomHalfY / TILE_SIZE) == 'S';
 
   if (onSpike)
-    initPlayer();
+    playerDeath();
 
   Vector2 newPos = {player.pos.x + player.vel.x, player.pos.y + player.vel.y};
 
@@ -391,6 +433,24 @@ void updatePlayer(float dt)
     }
   }
 
+  for (int i = 0; i < enemyCount; i++)
+  {
+    if (CheckCollisionRecs(
+            (Rectangle){
+                player.pos.x,
+                player.pos.y,
+                player.textureRect.width,
+                player.textureRect.height},
+            (Rectangle){
+                enemies[i].pos.x,
+                enemies[i].pos.y,
+                enemies[i].textureRect.width,
+                enemies[i].textureRect.height}))
+    {
+      playerDeath();
+    }
+  }
+
   player.vel.x *= 0.8;
   player.vel.y *= 0.9;
 }
@@ -412,30 +472,82 @@ void drawPlayer(Texture2D *spritesheet)
       WHITE);
 }
 
-void saveTilemapToFile()
+void initEnemy(Enemy *enemy)
 {
-  FILE *file = fopen("tilemap.txt", "w");
+  enemy->pos = (Vector2){0, 0};
+  enemy->vel = (Vector2){0, 0};
+  enemy->direction = 1;
+  enemy->textureRect = (Rectangle){0, TILE_SIZE * 2, TILE_SIZE, TILE_SIZE};
+  enemy->speed = 12;
+}
 
-  if (file == NULL)
-  {
-    perror("Unable to open file");
-    return;
-  }
+void updateEnemy(Enemy *enemy, float dt)
+{
+  bool isHoleAtBottom =
+      GET_TILE((int)(enemy->pos.x + TILE_SIZE / 2) / TILE_SIZE,
+               (int)(enemy->pos.y + TILE_SIZE * 1.5) / TILE_SIZE) == ' ';
+
+  bool isGroundInFront =
+      GET_TILE((int)(enemy->pos.x + TILE_SIZE / 2 + TILE_SIZE / 2 * enemy->direction) / TILE_SIZE,
+               (int)(enemy->pos.y + TILE_SIZE / 2) / TILE_SIZE) == 'G';
+
+  if (isHoleAtBottom || isGroundInFront)
+    enemy->direction *= -1;
+
+  enemy->vel.x = enemy->speed * enemy->direction * dt;
+  enemy->pos.x += enemy->vel.x;
+}
+
+void drawEnemy(Enemy *enemy, Texture2D *spritesheet)
+{
+  Rectangle destRect = {
+      enemy->pos.x,
+      enemy->pos.y,
+      enemy->textureRect.width,
+      enemy->textureRect.height};
+
+  DrawTexturePro(
+      *spritesheet,
+      enemy->textureRect,
+      destRect,
+      (Vector2){0, 0},
+      0,
+      WHITE);
+}
+
+void initEnemies()
+{
+  enemyCount = 0;
 
   for (int y = 0; y < MAP_HEIGHT; y++)
   {
     for (int x = 0; x < MAP_WIDTH; x++)
     {
-      fputc(tilemap[level][y * MAP_WIDTH + x], file);
+      if (GET_TILE(x, y) == 'E')
+      {
+        initEnemy(&enemies[enemyCount]);
+        enemies[enemyCount].pos = (Vector2){x * TILE_SIZE, y * TILE_SIZE};
+        enemyCount++;
+      }
     }
-
-    fputc('\n', file);
   }
-
-  fclose(file);
 }
 
-char currentTile = ' ';
+void updateEnemies(float dt)
+{
+  for (int i = 0; i < enemyCount; i++)
+  {
+    updateEnemy(&enemies[i], dt);
+  }
+}
+
+void drawEnemies(Texture2D *spritesheet)
+{
+  for (int i = 0; i < enemyCount; i++)
+  {
+    drawEnemy(&enemies[i], spritesheet);
+  }
+}
 
 void handleMouseClick(int mouseX, int mouseY)
 {
@@ -444,12 +556,9 @@ void handleMouseClick(int mouseX, int mouseY)
 
   if (tileX >= 0 && tileX < MAP_WIDTH && tileY >= 0 && tileY < MAP_HEIGHT)
   {
-    tilemap[level][tileY * MAP_WIDTH + tileX] = currentTile;
+    tilemap[level][tileY * MAP_WIDTH + tileX] = selectedTileToInsert;
   }
 }
-
-char keys[] = {KEY_SPACE, KEY_G, KEY_L, KEY_D, KEY_K, KEY_S};
-int numKeys = sizeof(keys) / sizeof(keys[0]);
 
 int main(void)
 {
@@ -467,9 +576,9 @@ int main(void)
       MAP_WIDTH * TILE_SIZE,
       MAP_HEIGHT * TILE_SIZE);
 
-  initTilemap();
-  initTiles();
+  initMap();
   initPlayer();
+  initEnemies();
 
   while (!WindowShouldClose())
   {
@@ -481,16 +590,16 @@ int main(void)
     if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_S))
       saveTilemapToFile();
 
-    for (int i = 0; i < numKeys; i++)
+    for (int i = 0; i < numKeysToInsertTiles; i++)
     {
-      if (IsKeyPressed(keys[i]))
+      if (IsKeyPressed(keysToInsertTiles[i]))
       {
-        currentTile = keys[i];
+        selectedTileToInsert = keysToInsertTiles[i];
         break;
       }
     }
 
-    Vector2 origin = {
+    Vector2 originVec = {
         (GetScreenWidth() - GetRenderWidth() / GetWindowScaleDPI().x) / 2,
         (GetScreenHeight() - GetRenderHeight() / GetWindowScaleDPI().y) / 2};
 
@@ -499,35 +608,61 @@ int main(void)
       Vector2 mousePosition = GetMousePosition();
 
       handleMouseClick(
-          (int)(mousePosition.x + origin.x),
-          (int)(mousePosition.y + origin.y));
+          (int)(mousePosition.x + originVec.x),
+          (int)(mousePosition.y + originVec.y));
     }
 
     float dt = GetFrameTime();
 
-    time -= dt;
+    levelTime -= dt;
 
     updatePlayer(dt);
+    updateEnemies(dt);
 
     BeginTextureMode(renderTexture);
 
     ClearBackground(BLACK);
 
-    drawTiles(&tileset);
+    drawMap(&tileset);
     drawPlayer(&spritesheet);
+    drawEnemies(&spritesheet);
 
-    DrawText(TextFormat("Level: %d", level + 1), 20, 18, 9, WHITE);
-    DrawText(TextFormat("Time: %.0f", time), 335, 18, 9, WHITE);
+    DrawText(TextFormat("Lives: %d", lives), 20, 18, 9, WHITE);
+    DrawText(TextFormat("Level: %d", level + 1), 180, 18, 9, WHITE);
+    DrawText(TextFormat("Time: %.0f", levelTime), 335, 18, 9, WHITE);
 
     EndTextureMode();
 
     BeginDrawing();
 
+    float targetAspectRatio = 800.0f / 450.0f;
+    float windowAspectRatio = (float)GetScreenWidth() / (float)GetScreenHeight();
+    float scale = 1;
+
+    Rectangle destRect;
+
+    if (windowAspectRatio >= targetAspectRatio)
+    {
+      scale = (float)GetScreenHeight() / 450;
+      destRect.width = 800 * scale;
+      destRect.height = 450 * scale;
+      destRect.x = (GetScreenWidth() - destRect.width) / 2;
+      destRect.y = 0;
+    }
+    else
+    {
+      scale = (float)GetScreenWidth() / 800;
+      destRect.width = 800 * scale;
+      destRect.height = 450 * scale;
+      destRect.x = 0;
+      destRect.y = (GetScreenHeight() - destRect.height) / 2;
+    }
+
     DrawTexturePro(
         renderTexture.texture,
         (Rectangle){0, 0, renderTexture.texture.width, -renderTexture.texture.height},
-        (Rectangle){0, 0, GetScreenWidth(), GetScreenHeight()},
-        origin,
+        destRect,
+        originVec,
         0,
         WHITE);
 
@@ -542,4 +677,24 @@ int main(void)
   CloseWindow();
 
   return 0;
+}
+
+void changeLevel()
+{
+  level = (level + 1) % LEVEL_COUNT;
+  levelTime = LEVEL_TIME;
+
+  if (level == 0)
+    resetTilemap();
+
+  initPlayer();
+  initEnemies();
+}
+
+void playerDeath()
+{
+  lives--;
+
+  initPlayer();
+  initEnemies();
 }
