@@ -7,6 +7,10 @@
 #define MAP_HEIGHT 18
 #define TILE_SIZE 12
 #define TILE_COUNT 6
+#define RENDER_WIDTH (MAP_WIDTH * TILE_SIZE)
+#define RENDER_HEIGHT (MAP_HEIGHT * TILE_SIZE)
+#define TARGET_WIDTH 800
+#define TARGET_HEIGHT 450
 #define LEVEL_COUNT 2
 #define LEVEL_TIME 200
 #define GRAVITY 9.81
@@ -45,6 +49,8 @@ int lives = LIVES;
 int enemyCount = 0;
 
 float levelTime = LEVEL_TIME;
+
+bool isGameOver = false;
 
 char selectedTileToInsert = ' ';
 
@@ -98,6 +104,8 @@ Player player = {0};
 Enemy enemies[MAX_ENEMIES];
 
 void changeLevel();
+
+void restartGame();
 
 void initTilemap()
 {
@@ -298,7 +306,7 @@ void initPlayer()
   player.vel = (Vector2){0, 0};
   player.textureRect = (Rectangle){0, 0, TILE_SIZE, TILE_SIZE * 2};
   player.speed = 12;
-  player.jumpHeight = 4;
+  player.jumpHeight = 4.5;
   player.isOnGround = false;
 }
 
@@ -500,6 +508,12 @@ void updateEnemy(Enemy *enemy, float dt)
 
 void drawEnemy(Enemy *enemy, Texture2D *spritesheet)
 {
+  Rectangle sourceRect = {
+      enemy->textureRect.x,
+      enemy->textureRect.y,
+      enemy->textureRect.width * enemy->direction,
+      enemy->textureRect.height};
+
   Rectangle destRect = {
       enemy->pos.x,
       enemy->pos.y,
@@ -508,7 +522,7 @@ void drawEnemy(Enemy *enemy, Texture2D *spritesheet)
 
   DrawTexturePro(
       *spritesheet,
-      enemy->textureRect,
+      sourceRect,
       destRect,
       (Vector2){0, 0},
       0,
@@ -549,6 +563,18 @@ void drawEnemies(Texture2D *spritesheet)
   }
 }
 
+void drawGameOver()
+{
+  int gameOverWidth = MeasureText("Game Over", 20);
+
+  DrawText(
+      "Game Over",
+      RENDER_WIDTH / 2 - gameOverWidth / 2,
+      RENDER_HEIGHT / 2 - 10,
+      20,
+      WHITE);
+}
+
 void handleMouseClick(int mouseX, int mouseY)
 {
   int tileX = mouseX / (GetScreenWidth() / MAP_WIDTH);
@@ -572,9 +598,7 @@ int main(void)
   Texture2D tileset = LoadTexture("tileset.png");
   Texture2D spritesheet = LoadTexture("spritesheet.png");
 
-  RenderTexture2D renderTexture = LoadRenderTexture(
-      MAP_WIDTH * TILE_SIZE,
-      MAP_HEIGHT * TILE_SIZE);
+  RenderTexture2D renderTexture = LoadRenderTexture(RENDER_WIDTH, RENDER_HEIGHT);
 
   initMap();
   initPlayer();
@@ -614,10 +638,23 @@ int main(void)
 
     float dt = GetFrameTime();
 
-    levelTime -= dt;
+    if (isGameOver)
+    {
+      if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_R))
+        restartGame();
+    }
+    else
+    {
+      levelTime -= dt;
 
-    updatePlayer(dt);
-    updateEnemies(dt);
+      if (levelTime <= 0) {
+        levelTime = LEVEL_TIME;
+        playerDeath();
+      }
+
+      updatePlayer(dt);
+      updateEnemies(dt);
+    }
 
     BeginTextureMode(renderTexture);
 
@@ -631,11 +668,14 @@ int main(void)
     DrawText(TextFormat("Level: %d", level + 1), 180, 18, 9, WHITE);
     DrawText(TextFormat("Time: %.0f", levelTime), 335, 18, 9, WHITE);
 
+    if (isGameOver)
+      drawGameOver();
+
     EndTextureMode();
 
     BeginDrawing();
 
-    float targetAspectRatio = 800.0f / 450.0f;
+    float targetAspectRatio = (float)TARGET_WIDTH / (float)TARGET_HEIGHT;
     float windowAspectRatio = (float)GetScreenWidth() / (float)GetScreenHeight();
     float scale = 1;
 
@@ -643,17 +683,17 @@ int main(void)
 
     if (windowAspectRatio >= targetAspectRatio)
     {
-      scale = (float)GetScreenHeight() / 450;
-      destRect.width = 800 * scale;
-      destRect.height = 450 * scale;
+      scale = (float)GetScreenHeight() / TARGET_HEIGHT;
+      destRect.width = TARGET_WIDTH * scale;
+      destRect.height = TARGET_HEIGHT * scale;
       destRect.x = (GetScreenWidth() - destRect.width) / 2;
       destRect.y = 0;
     }
     else
     {
-      scale = (float)GetScreenWidth() / 800;
-      destRect.width = 800 * scale;
-      destRect.height = 450 * scale;
+      scale = (float)GetScreenWidth() / TARGET_WIDTH;
+      destRect.width = TARGET_WIDTH * scale;
+      destRect.height = TARGET_HEIGHT * scale;
       destRect.x = 0;
       destRect.y = (GetScreenHeight() - destRect.height) / 2;
     }
@@ -691,9 +731,27 @@ void changeLevel()
   initEnemies();
 }
 
+void restartGame()
+{
+  level = 0;
+  lives = LIVES;
+  levelTime = LEVEL_TIME;
+  isGameOver = false;
+
+  resetTilemap();
+  initPlayer();
+  initEnemies();
+}
+
 void playerDeath()
 {
   lives--;
+
+  if (lives == 0)
+  {
+    isGameOver = true;
+    return;
+  }
 
   initPlayer();
   initEnemies();
