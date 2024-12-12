@@ -16,6 +16,7 @@
 #define GRAVITY 9.81
 #define LIVES 3
 #define MAX_ENEMIES 10
+#define TRANSITION_TIME 1.0f
 
 #define GET_TILE(x, y) (tilemap[level][(y) * MAP_WIDTH + (x)])
 
@@ -49,7 +50,10 @@ int lives = LIVES;
 int enemyCount = 0;
 
 float levelTime = LEVEL_TIME;
+float transitionTimer = 0;
 
+bool isPaused = false;
+bool isTransition = false;
 bool isGameOver = false;
 bool isWin = false;
 
@@ -285,6 +289,52 @@ void pickUpKey(int x, int y)
     openDoor();
 }
 
+void (*transitionCallback)() = NULL;
+
+void startTransition(void (*callback)())
+{
+  isTransition = true;
+  transitionCallback = callback;
+}
+
+void updateTransition(float dt)
+{
+  if (!isTransition)
+    return;
+
+  isPaused = true;
+  transitionTimer += dt;
+
+  if (transitionTimer >= TRANSITION_TIME)
+  {
+    transitionTimer = 0;
+    isTransition = false;
+    isPaused = false;
+
+    if (transitionCallback != NULL)
+    {
+      transitionCallback();
+      transitionCallback = NULL;
+    }
+  }
+}
+
+void drawTransition()
+{
+  if (!isTransition)
+    return;
+
+  int columns = (int)(transitionTimer / TRANSITION_TIME * MAP_WIDTH);
+
+  for (int y = 0; y < MAP_HEIGHT; y++)
+  {
+    for (int x = 0; x < columns; x++)
+    {
+      DrawRectangle(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE, BLACK);
+    }
+  }
+}
+
 Vector2 findPlayerPosition()
 {
   for (int y = 0; y < MAP_HEIGHT; y++)
@@ -392,6 +442,24 @@ void updatePlayer(float dt)
   if (onSpike)
     playerDeath();
 
+  for (int i = 0; i < enemyCount; i++)
+  {
+    if (CheckCollisionRecs(
+            (Rectangle){
+                player.pos.x,
+                player.pos.y,
+                player.textureRect.width,
+                player.textureRect.height},
+            (Rectangle){
+                enemies[i].pos.x,
+                enemies[i].pos.y,
+                enemies[i].textureRect.width,
+                enemies[i].textureRect.height}))
+    {
+      playerDeath();
+    }
+  }
+
   Vector2 newPos = {player.pos.x + player.vel.x, player.pos.y + player.vel.y};
 
   bool skippedVerticalCollision = false;
@@ -439,24 +507,6 @@ void updatePlayer(float dt)
     {
       player.pos.x = newPos.x;
       break;
-    }
-  }
-
-  for (int i = 0; i < enemyCount; i++)
-  {
-    if (CheckCollisionRecs(
-            (Rectangle){
-                player.pos.x,
-                player.pos.y,
-                player.textureRect.width,
-                player.textureRect.height},
-            (Rectangle){
-                enemies[i].pos.x,
-                enemies[i].pos.y,
-                enemies[i].textureRect.width,
-                enemies[i].textureRect.height}))
-    {
-      playerDeath();
     }
   }
 
@@ -661,17 +711,25 @@ int main(void)
     }
     else
     {
-      levelTime -= dt;
+      if (IsKeyPressed(KEY_P))
+        isPaused = !isPaused;
 
-      if (levelTime <= 0)
+      if (!isPaused)
       {
-        levelTime = LEVEL_TIME;
-        playerDeath();
-      }
+        levelTime -= dt;
 
-      updatePlayer(dt);
-      updateEnemies(dt);
+        if (levelTime <= 0)
+        {
+          levelTime = LEVEL_TIME;
+          playerDeath();
+        }
+
+        updatePlayer(dt);
+        updateEnemies(dt);
+      }
     }
+
+    updateTransition(dt);
 
     BeginTextureMode(renderTexture);
 
@@ -690,6 +748,8 @@ int main(void)
 
     if (isWin)
       drawWin();
+
+    drawTransition();
 
     EndTextureMode();
 
@@ -767,7 +827,7 @@ void restartGame()
   initEnemies();
 }
 
-void playerDeath()
+void playerDeathAfterTransition()
 {
   lives--;
 
@@ -779,4 +839,9 @@ void playerDeath()
 
   initPlayer();
   initEnemies();
+}
+
+void playerDeath()
+{
+  startTransition(playerDeathAfterTransition);
 }
